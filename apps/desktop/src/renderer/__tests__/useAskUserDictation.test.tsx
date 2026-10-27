@@ -44,7 +44,8 @@ describe('useAskUserDictation', () => {
 
   // Unit: real hook, delayed readiness/IPC. Existing coverage only delivered
   // transcripts after startup; it missed lost opening words and late captures
-  // continuing after Escape/unmount in the question answer field.
+  // continuing after Escape/unmount in the question answer field. PR #7438:
+  // submitting before startup settles must also unlock when cancelled.
   it.each(['cancel', 'unmount'] as const)('captures before readiness and ignores a late service start after %s', async (action) => {
     let onEvent: ((event: VoiceInputRendererEvent) => void) | undefined;
     let check!: (value: Awaited<ReturnType<typeof resolveVoiceInputStartGuards>>) => void;
@@ -73,6 +74,9 @@ describe('useAskUserDictation', () => {
     expect(start).toHaveBeenCalledOnce();
     act(() => onEvent?.({ type: 'draft', runId: 'late-run', text: '未提交语音', source: 'partial' } as VoiceInputRendererEvent));
     expect(hook.result.current.liveText).toBe('已有未提交语音回答');
+    let stopped: boolean | undefined;
+    await act(async () => { void hook.result.current.stop().then((ok) => { stopped = ok; }); });
+    expect(stopped).toBeUndefined();
     if (action === 'cancel') {
       await act(async () => { await hook.result.current.cancel(); });
       expect(hook.result.current.isBusy).toBe(false);
@@ -80,6 +84,8 @@ describe('useAskUserDictation', () => {
     } else {
       hook.unmount();
     }
+    await act(async () => {});
+    expect(stopped).toBe(false);
     await act(async () => { connected({ ok: true, runId: 'late-run' }); });
     act(() => onEvent?.({ type: 'submitted', runId: 'late-run', text: '迟到的结果' } as VoiceInputRendererEvent));
     expect(cancel).toHaveBeenCalledWith({ runId: 'late-run' });

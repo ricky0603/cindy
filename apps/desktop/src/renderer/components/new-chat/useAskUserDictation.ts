@@ -418,12 +418,14 @@ export function useAskUserDictation(
     setVoiceState('submitting');
     const stopping = (async () => {
       try {
+        const completion = completionRef.current;
         // Capture may already be live while the service is connecting. Stop it
         // before awaiting startup so post-press speech is not included.
         await stopEngine();
-        await startReadyRef.current;
+        // Cancellation/unmount settles completion even if startup IPC has not
+        // returned. Release the submitter now; startup still cancels a late run.
+        await (completion ? Promise.race([startReadyRef.current, completion.promise]) : startReadyRef.current);
         if (attemptRef.current !== attempt) return false;
-        const completion = completionRef.current;
         const settings = getVoiceInputSettings();
         if (settings.playInteractionSound) playVoiceInputEndCue();
         // Also release an engine whose startup finished after the first stop.
