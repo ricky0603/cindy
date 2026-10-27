@@ -482,7 +482,7 @@ describe('createBrowserMcpServer', () => {
     await h.cleanup();
   });
 
-  it('compiles extract into an act:evaluate call', async () => {
+  it('sends a structured DOM read with an evaluate fallback for other runtimes', async () => {
     const h = await makeHarness();
     await h.client.callTool({
       name: 'call_tool',
@@ -501,6 +501,9 @@ describe('createBrowserMcpServer', () => {
     expect(call.action).toBe('act');
     expect(call.targetId).toBe('t1');
     expect(call.request?.kind).toBe('evaluate');
+    expect(call.request).toMatchObject({ domRead: { kind: 'extract',
+      extract: { from: '.book', multiple: true, fields: { title: 'h3', price: '.price_color' } },
+    } });
     // The compiled fn carries the field schema and is a function source.
     expect(call.request?.fn).toContain('querySelectorAll');
     expect(call.request?.fn).toContain('.book');
@@ -1130,7 +1133,8 @@ describe('createBrowserMcpServer', () => {
       expect(parsed.loginWall).toBeUndefined();
     }
     // The check runs on the tab the snapshot came from.
-    expect(h.calls[1]).toMatchObject({ action: 'act', targetId: 't9', request: { kind: 'evaluate' } });
+    expect(h.calls[1]).toMatchObject({ action: 'act', targetId: 't9',
+      request: { kind: 'evaluate', domRead: { kind: 'login-wall' } } });
     await h.cleanup();
   });
 

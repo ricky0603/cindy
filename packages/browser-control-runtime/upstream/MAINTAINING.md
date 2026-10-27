@@ -179,7 +179,7 @@ pnpm --filter @cindy/browser-control-runtime test    # 契约 + SSRF guard
 - **实际页面对照**：`scripts/browser-live-history-compare.mjs` 按 `--source-root` 加载指定 checkout 的真实 MCP/runtime，用 attach-only 连接已授权的 Cindy 专用浏览器，不启停 Chrome 或复制登录态。页面计划中的 role/name/href/selector 必须来自当次侦察；每步校验 URL 与实际业务信息，加载未完成的等待和补读计入指标。登录、重置起始页面、独立 alias 探测不计入流程；原始步骤与结果落到显式 `--out` 路径。只用于已授权的只读导航，不把线上提交、上传或发布塞进比较计划。
 
 - **`requests` / `responseBody`(L1 runtime)**:接的是 vendored **已存在但原先没接线**的两条路由(`GET /requests`、`POST /response/body`,见 `_generated/.../pw-tools-core.activity.ts` / `pw-tools-core.responses.ts`)。runtime 复用 per-page 自动捕获缓冲(上限 500、page 关闭自动清),`runtime.ts` 的 `planDispatch` 加两个 case 即可,无新监听、无泄漏。语义:很多页面背后是 JSON API,读接口比扒 DOM 又稳又省。`responseBody` 在 chrome-mcp 接管态返 501,但默认 managed profile 不触发。
-- **`extract`(L2 MCP,`extract.ts`)**:纯组合现有 `act:evaluate`。`buildExtractFnSource(spec)` 是**纯函数**,把字段 schema 编译成注入 JS(选择器一律 `JSON.stringify` 注入,防注入),handler 改写成 `act:{kind:'evaluate',fn}`。不碰 runtime 包。**报错教模型(对齐上游 `SELECTOR_UNSUPPORTED_MESSAGE` 范式)**:生成的 fn 给 `querySelector` 包 try/catch,非法选择器 → 返回 `{ok:false, error, hint}`(`EXTRACT_FIELD_HINT` 教正确字段格式);handler 跑前用 `collectSelectors` 预检 selector 含 `@`(观察到模型爱写 `h3 a@title`)→ 直接返回教学报错,不空跑。**不加 `@attr` 语法糖**(上游无此约定)。
+- **`extract`(L2 MCP,`extract.ts`)**:字段契约和纯函数 `buildExtractFnSource(spec)` 由 runtime 的 `dom-read.ts` 共享，选择器一律经 `JSON.stringify` 注入。直接 extract 和快照后的固定登录墙检测携带内部 `domRead` 结构；CDP 路径在隔离世界执行固定读取，避免网页改写 DOM 方法产生副作用，省去通用交互的 250 ms 延迟。仍检查 evaluate 开关、读取前后导航策略和页面 URL，不授予跨域访问。任意调用方 `fn` 不参与此路径；普通 evaluate、点击和含 guard 的配方保持原守卫。旧 runtime、嵌入式和 chrome-mcp 后端继续执行同时传入的 `fn`，没有新增模型可用的只读标志或工具 action。非法选择器仍返回 `{ok:false, error, hint}`，MCP 预检含 `@` 的误用并提示正确格式，不加 `@attr` 语法糖。隔离世界、登录 iframe 和守卫的真实 Chrome 回归：`node --import tsx scripts/browser-dom-read-live-check.mjs`，另加 `--evaluate-disabled` 验证关闭执行时仍拒绝读取。
 - **`recipe` / `siteguide`(L2 MCP)**:`recipe-loader.ts`(`parseRecipes`/`parseSiteGuides` 纯函数 + `loadRecipes`/`loadSiteGuides` 用 `import.meta.glob('./recipes/*/{recipe,siteguide}.json',{query:'?raw',eager:true})` 打包)+ `recipe-runner.ts`(`runRecipe(recipe,inputs,{call})` 纯执行器,注入 `call` 可单测)。数据在 `packages/lizi-mcps/src/browser/recipes/<site>/`。**交互步(click/type/select)直接用稳定 CSS `selector`**——vendored `act` 对 `SELECTOR_ALLOWED_KINDS`(click/type/select/hover/wait)支持 selector 直传,**无需 snapshot→ref**,所以配方不写死 ref、跨会话不腐烂(`fill` 是 ref-only,配方用 `type` 输入文本)。registry 懒加载(首次 recipe/siteguide 调用才解析,坏配方不拖垮整个工具)。`siteguide` **按需 action 拉取**,不进常驻 rules,保持缓存前缀小。**命名 `siteguide` 而非 `sitemap`**:避免和网站自己的 `/sitemap.xml` 撞概念(实测中模型会把 `sitemap` 误解成去抓 sitemap.xml)。
 - **配方分层 + 自我成长(L1 内置 + L2 用户,rule 20)**:配方/指南是"可成长"的——内置 L1(随 app 版本发布)+ 用户本地 L2(`userData/browser-recipes/<site>/`)按 **recipe id / siteguide site 整条覆盖**合并,provenance 三态 `builtin`/`user`/`overridden`(`recipe-loader.ts` 的纯函数 `mergeRecipes`/`mergeSiteGuides`)。**恢复默认 = 删 L2 该站文件**(回落 L1,不写快照)。
   - **解耦**:`@cindy/mcps` 不碰 fs/electron;host 经 `BrowserMcpDeps.getUserRecipes?`(读)/`saveUserRecipe?`(写)注入。host 侧在 `apps/desktop/src/main/browser-recipes/{loader,writer}.ts`(蓝本 `local-themes/{loader,writer}`),loader 扫盘 + 调 @cindy/mcps `parseRecipes` + 算 `version` 内容指纹。
@@ -196,6 +196,12 @@ pnpm --filter @cindy/browser-control-runtime test    # 契约 + SSRF guard
 - ⚠️ **`responseBody` 是"等待下一个匹配响应"语义**(`pw-tools-core.responses.ts`:`page.on("response")` + 20s 超时),**不读历史**。顺序工具调用的 agent 很难"先 arm 再触发",所以读 GET JSON 接口的可靠姿势是**直接 navigate 到该 URL + extract/evaluate 读 body**;`requests` 才是读已发生请求清单的那个(buffered)。rules 已据此修正(实测踩过:navigate 后再 responseBody 会"not found")。
 
 > 加新 action 改了 `browser` 工具 schema → 会话启动一次性注册(`maker-core/.../claude-code/index.ts:713`),一次性失效缓存前缀、稳态不降;按规则 10 实测。新增 action 要两端同步:runtime `types.ts` 的 `BrowserControlAction` ⇄ `tools.ts` 的 `ACTIONS`(exhaustive switch 会强制对齐)。
+
+### 固定 DOM 读取的生命周期边界（2026-10-27）
+
+- 读取沿用已有弹窗中断信号，并给 CDP 命令设置总时限。弹窗期间 Chrome 可能暂停 detach：及时返回 `blockedByDialog`，原 scoped session 的 finally 在 Chrome 恢复后完成释放，不新增连接缓存或重试。
+- 读取前后的主 frame `loaderId` 必须一致，防止同网址刷新后返回旧文档的结果；页面 URL 与导航策略检查仍保留。同网址内的动态内容没有通用“已加载”判据，调用方仍需等待真实业务文字或元素。
+- `scripts/browser-dom-read-live-check.mjs` 包含真实弹窗、同网址刷新、慢加载与连续 500 次读取检查。资源样本在垃圾回收后读取页面 JS heap、命名隔离世界数量和 CDP session 释放情况；不等同于长时间整进程内存保证。
 
 ### 配方按使用维护与等待条件（2026-10-23）
 

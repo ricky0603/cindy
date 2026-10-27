@@ -6,6 +6,7 @@ import {
   type BrowserControlRuntime,
 } from '@cindy/browser-control-runtime';
 import { z } from 'zod';
+import { LOGIN_WALL_FN } from '@cindy/browser-control-runtime/dom-read';
 
 import {
   INLINE_IMAGE_TARGET_BYTES,
@@ -209,25 +210,13 @@ const MAX_RESULT_BYTES = 200_000;
  * owner should fill it from their own device. A cheap DOM check after a
  * snapshot; any failure means no hint.
  */
-const LOGIN_WALL_FN = `() => {
-  const docs = [document];
-  for (const frame of document.querySelectorAll('iframe')) {
-    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch {}
-  }
-  const has = (selector) => docs.some((doc) => doc.querySelector(selector));
-  return {
-    password: !!has('input[type=password]'),
-    code: !!has('input[autocomplete="one-time-code"]'),
-  };
-}`;
-
 async function detectLoginWall(runtime: BrowserControlRuntime, profile: unknown, targetId: unknown) {
   try {
     const checked = await runtime.call({
       action: 'act',
       ...(typeof profile === 'string' ? { profile } : {}),
       ...(typeof targetId === 'string' ? { targetId } : {}),
-      request: { kind: 'evaluate', fn: LOGIN_WALL_FN, timeoutMs: 2000 },
+      request: { kind: 'evaluate', fn: LOGIN_WALL_FN, domRead: { kind: 'login-wall' }, timeoutMs: 2000 },
     } as BrowserControlRequest);
     const found = (checked.data as { result?: { password?: unknown; code?: unknown } } | undefined)?.result;
     if (!checked.ok || (found?.password !== true && found?.code !== true)) return null;
@@ -1006,8 +995,8 @@ export function registerBrowserTools(registry: BrowserToolRegistry, deps: Browse
 
         let result;
         if (args.action === 'extract') {
-          // `extract` is composition over the existing `evaluate` primitive:
-          // compile the field schema to an injected fn and run it on the page.
+          // Supply the fixed read spec for the runtime's isolated DOM reader,
+          // plus the generated fn for backends using the legacy evaluate path.
           if (!args.extract) {
             return errorResult('extract', 'extract requires an `extract` spec ({ from?, multiple?, fields, limit? })');
           }
@@ -1037,6 +1026,7 @@ export function registerBrowserTools(registry: BrowserToolRegistry, deps: Browse
             request: {
               kind: 'evaluate',
               fn: buildExtractFnSource(spec),
+              domRead: { kind: 'extract', extract: spec },
               ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
             },
           } as BrowserControlRequest);
