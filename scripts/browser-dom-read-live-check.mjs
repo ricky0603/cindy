@@ -66,6 +66,8 @@ const { BrowserToolRegistry } =
   await import("../packages/lizi-mcps/src/browser/tool-registry.ts");
 const { registerBrowserTools } =
   await import("../packages/lizi-mcps/src/browser/tools.ts");
+const { runRecipe } =
+  await import("../packages/lizi-mcps/src/browser/recipe-runner.ts");
 const { LOGIN_WALL_FN } =
   await import("../packages/browser-control-runtime/src/dom-read.ts");
 const { getPageForTargetId, respondToObservedDialogOnPage } =
@@ -267,6 +269,43 @@ try {
         .records[0].status,
       "ready",
     );
+    // PR #7432: use the production recipe runner, checking the unguarded fast
+    // path and that adding a guard still enforces identity before reading.
+    const recipeRead = (guard) =>
+      runRecipe(
+        {
+          id: "dom-read-check",
+          steps: [
+            {
+              action: "extract",
+              extract: statusSpec,
+              ...(guard ? { guard } : {}),
+              as: "value",
+            },
+          ],
+          output: "{{value}}",
+        },
+        {},
+        { call: (request) => runtime.call({ ...request, targetId }) },
+      );
+    const beforeRecipeTimers = navigationGraceTimers;
+    assert.equal((await recipeRead()).output.records[0].status, "ready");
+    assert.equal(navigationGraceTimers, beforeRecipeTimers);
+    assert.equal(
+      (await recipeRead({ url: base + "/wrong" })).failureKind,
+      "guard",
+    );
+    assert.equal(
+      (
+        await recipeRead({
+          url: base + "/dynamic",
+          selector: "#status",
+          text: "ready",
+        })
+      ).output.records[0].status,
+      "ready",
+    );
+    assert.ok(navigationGraceTimers > beforeRecipeTimers);
     await call({ action: "navigate", url: base + "/cross-only" });
 
     // Count actual sessions and execution contexts on this disposable page.
@@ -371,6 +410,7 @@ try {
           "password detection",
           "no arbitrary fn on read path",
           "general evaluate retains grace",
+          "unguarded recipe uses fixed read and guarded recipe preserves identity check",
           "modal read returns blockedByDialog",
           "same-URL delayed content requires business wait",
           "same-URL reload rejects stale result",
