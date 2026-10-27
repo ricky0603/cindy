@@ -101,6 +101,20 @@ function normalizeFields(
   return out;
 }
 
+/** JSON quoting plus script-delimiter/line-separator escaping for JS source. */
+function javascriptLiteral(value: unknown): string {
+  return JSON.stringify(value).replace(
+    /[<>\u2028\u2029]/g,
+    (char) =>
+      ({
+        "<": "\\u003c",
+        ">": "\\u003e",
+        "\u2028": "\\u2028",
+        "\u2029": "\\u2029",
+      })[char]!,
+  );
+}
+
 /**
  * Compile an extract spec into a zero-arg JS function source string suitable for
  * `act:evaluate`. The function runs in page context and returns
@@ -115,8 +129,8 @@ export function buildExtractFnSource(spec: ExtractSpec): string {
   };
   // The whole spec + hint are embedded as JSON literals — selectors/attrs are
   // data, not code, so there is no injection surface.
-  const specLiteral = JSON.stringify(normalized);
-  const hintLiteral = JSON.stringify(EXTRACT_FIELD_HINT);
+  const specLiteral = javascriptLiteral(normalized);
+  const hintLiteral = javascriptLiteral(EXTRACT_FIELD_HINT);
   // querySelector is guarded: an invalid selector (e.g. natural language, or the
   // "h3 a@title" attr-in-selector mistake) is collected into `bad` and reported
   // as ok:false + hint, instead of throwing and killing the whole extract.

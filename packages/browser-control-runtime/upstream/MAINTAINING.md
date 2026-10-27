@@ -199,6 +199,7 @@ pnpm --filter @cindy/browser-control-runtime test    # 契约 + SSRF guard
 
 ### 固定 DOM 读取的生命周期边界（2026-10-27）
 
+- 生成提取函数时，在 JSON 引号转义之外，对 `<`、`>` 和 U+2028/U+2029 做 JavaScript 字面量转义；参数还原为原值，避免脚本分隔符混入生成源码。保持 `Runtime.evaluate` 的浏览器原生执行超时及宿主总时限。
 - 无 guard 的配方 extract 与直接 extract 使用相同结构化读取。含 guard 的配方合并身份校验与提取后，必须删除 `domRead` 元数据，保持普通 evaluate 路径，避免 runtime 忽略合并函数而绕过 guard。
 - 读取沿用已有弹窗中断信号，并给 CDP 命令设置总时限。弹窗期间 Chrome 可能暂停 detach：及时返回 `blockedByDialog`，原 scoped session 的 finally 在 Chrome 恢复后完成释放，不新增连接缓存或重试。
 - 读取前后的主 frame `loaderId` 必须一致，防止同网址刷新后返回旧文档的结果；页面 URL 与导航策略检查仍保留。同网址内的动态内容没有通用“已加载”判据，调用方仍需等待真实业务文字或元素。
