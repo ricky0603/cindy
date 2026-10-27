@@ -75,13 +75,23 @@ function renderAsk(questions: PendingAskUser['questions']) {
 describe('AskUserQuestion voice entry', () => {
   // Unit: real answer field/gesture; previous card tests covered only mic
   // clicks. Holding must share composer semantics without hijacking selection.
+  // PR #7438: native selected-text drags can omit subsequent pointer events.
   it('records on hold, stops on release, and leaves ordinary drag selection alone', async () => {
     vi.useFakeTimers();
     const { view, onAnswer } = renderAsk([{ question: '回答？' }]);
     const input = view.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '已有回答' } });
+    (input as HTMLTextAreaElement).setSelectionRange(0, 2);
+    fireEvent.pointerDown(input, { button: 0, pointerId: 0 });
+    expect(fireEvent.dragStart(input)).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
+    expect(start).not.toHaveBeenCalled();
+    expect((input as HTMLTextAreaElement).value).toBe('已有回答');
     fireEvent.pointerDown(input, { button: 0, pointerId: 1 });
     await act(async () => { await vi.advanceTimersByTimeAsync(650); });
     expect(start).toHaveBeenCalledOnce();
+    expect(fireEvent.dragStart(input)).toBe(false);
+    expect(stop).not.toHaveBeenCalled();
     fireEvent.pointerUp(window, { pointerId: 1 });
     await act(async () => {});
     expect(stop).toHaveBeenCalledOnce();

@@ -101,13 +101,21 @@ function AutoGrowingAnswerTextarea({
       if (event.pointerId === pointerId) gesture.move({ x: event.clientX, y: event.clientY });
     };
     const release = () => { gesture.release(); pointerId = null; };
+    const dragStart = (event: DragEvent) => {
+      // Native text dragging can swallow pointermove/up. Keep ordinary drags,
+      // but cancel their pending hold; an active hold must retain its release.
+      if (gesture.isHolding()) event.preventDefault();
+      else release();
+    };
     field.addEventListener('pointerdown', press);
+    field.addEventListener('dragstart', dragStart);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);
     window.addEventListener('blur', release);
     return () => {
       field.removeEventListener('pointerdown', press);
+      field.removeEventListener('dragstart', dragStart);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', release);
       window.removeEventListener('pointercancel', release);
